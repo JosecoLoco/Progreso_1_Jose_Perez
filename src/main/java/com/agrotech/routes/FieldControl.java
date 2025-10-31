@@ -1,36 +1,39 @@
 package com.agrotech.routes;
 
-import com.agrotech.db.MongoManager;
-import org.bson.Document;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.apache.camel.builder.RouteBuilder;
+import org.apache.camel.CamelContext;
+import org.apache.camel.impl.DefaultCamelContext;
+import org.apache.camel.ProducerTemplate;
 
-import java.util.List;
+public class FieldControl extends RouteBuilder {
+    @Override
+    public void configure() {
+        from("direct:solicitarLectura")
+            .log("[RPC] Cliente - Enviando solicitud para sensor: ${body}")
+            .setHeader("id_sensor", simple("${body}"))
+            .bean(com.agrotech.services.ServicioAnalitica.class, "getUltimoValor")
+            .log("[RPC] Cliente - Respuesta recibida: ${body}");
+    }
 
-public class FieldControl {
-    private static final Logger logger = LoggerFactory.getLogger(FieldControl.class);
+    public static void main(String[] args) throws Exception {
+        System.out.println("\n=== Cliente RPC - Iniciando ===");
+        System.out.println("Este programa actúa como cliente RPC para consultar datos de sensores");
+        System.out.println("------------------------------------------------------------");
 
-    public static void main(String[] args) {
-        try {
-            MongoManager.init();
-            List<Document> latest = MongoManager.getLatestBySensor();
+        CamelContext context = new DefaultCamelContext();
+        context.addRoutes(new FieldControl());
+        context.start();
 
-            System.out.println("Lecturas más recientes por sensor (desde MongoDB):");
-            System.out.println("------------------------------------------------");
-            System.out.printf("%-10s %-12s %-8s %-12s%n", "ID Sensor", "Fecha", "Humedad", "Temperatura");
-            System.out.println("------------------------------------------------");
-            for (Document d : latest) {
-                String idSensor = d.getString("id_sensor");
-                String fecha = d.getString("fecha");
-                Double humedad = d.getDouble("humedad");
-                Double temperatura = d.getDouble("temperatura");
-                System.out.printf("%-10s %-12s %-8.1f %-12.1f%n", idSensor, fecha, humedad != null ? humedad : 0.0, temperatura != null ? temperatura : 0.0);
-            }
-            System.out.println("------------------------------------------------");
-        } catch (Exception e) {
-            logger.error("Error en FieldControl: {}", e.getMessage(), e);
-        } finally {
-            MongoManager.close();
+        ProducerTemplate template = context.createProducerTemplate();
+        String[] sensores = {"S001", "S002", "S003"};
+        
+        for (String sensorId : sensores) {
+            System.out.println("\n>> Realizando llamada RPC para sensor: " + sensorId + " <<");
+            String response = template.requestBody("direct:solicitarLectura", sensorId, String.class);
+            System.out.println("------------------------------------------------------------");
         }
+
+        context.stop();
+        System.out.println("\n=== Cliente RPC - Finalizado ===");
     }
 }

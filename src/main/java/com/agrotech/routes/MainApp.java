@@ -1,108 +1,40 @@
 package com.agrotech.routes;
 
 import org.apache.camel.CamelContext;
-import org.apache.camel.Exchange;
 import org.apache.camel.builder.RouteBuilder;
 import org.apache.camel.impl.DefaultCamelContext;
-import org.json.JSONArray;
-import org.json.JSONObject;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import com.agrotech.db.MongoManager;
+import org.apache.camel.ProducerTemplate;
+import com.agrotech.services.ServicioAnalitica;
 
 public class MainApp {
-    private static final Logger logger = LoggerFactory.getLogger(MainApp.class);
+    public static void main(String[] args) throws Exception {
+        CamelContext context = new DefaultCamelContext();
+        context.addRoutes(new RouteBuilder() {
+            @Override
+            public void configure() {
+                from("direct:solicitarLectura")
+                    .log("\n[RPC] Cliente - Iniciando llamada RPC")
+                    .log("[RPC] Cliente - Solicitando datos del sensor: ${body}")
+                    .setHeader("id_sensor", simple("${body}"))
+                    .bean(ServicioAnalitica.class, "getUltimoValor")
+                    .log("[RPC] Cliente - Respuesta recibida: ${body}");
+            }
+        });
 
-    public static void main(String[] args) {
-    logger.info("Iniciando la ruta Camel...");
-
-        // Inicializar MongoDB (usa MONGO_URI env var o mongodb://localhost:27017)
-        try {
-            MongoManager.init();
-        } catch (Exception e) {
-            logger.warn("No se pudo inicializar MongoDB: {}. Continuando sin BD.", e.getMessage());
-        }
-
-        try (CamelContext context = new DefaultCamelContext()) {
-            context.addRoutes(new RouteBuilder() {
-                @Override
-                public void configure() {
-                    from("file:SensData?noop=true&include=sensores.csv")
-                        .log("Archivo detectado: ${header.CamelFileName}")
-                        .process(exchange -> {
-                            logger.debug("Procesando archivo CSV...");
-                            String csv = exchange.getIn().getBody(String.class);
-                            
-                            if (csv == null || csv.trim().isEmpty()) {
-                                logger.warn("CSV vacío o nulo - generando JSON vacío");
-                                exchange.getMessage().setBody("[]");
-                                exchange.getMessage().setHeader("CamelFileName", "sensores.json");
-                                return;
-                            }
-
-                            try {
-                                String[] lines = csv.split("\\r?\\n");
-                                if (lines.length == 0) {
-                                    logger.warn("CSV sin líneas - generando JSON vacío");
-                                    exchange.getMessage().setBody("[]");
-                                    exchange.getMessage().setHeader("CamelFileName", "sensores.json");
-                                    return;
-                                }
-
-                                JSONArray jsonArray = new JSONArray();
-                                String headerLine = lines[0].trim();
-                                headerLine = headerLine.replace("\uFEFF", ""); // Eliminar BOM si existe
-                                String[] headers = headerLine.split(",");
-
-                                for (int i = 1; i < lines.length; i++) {
-                                    String line = lines[i].trim();
-                                    if (line.isEmpty()) {
-                                        continue;
-                                    }
-
-                                    String[] values = line.split(",", -1);
-                                    JSONObject obj = new JSONObject();
-
-                                    // Intentar parsear e insertar en MongoDB (si está disponible)
-                                    try {
-                                        String idSensor = values.length > 0 ? values[0].trim() : "";
-                                        String fecha = values.length > 1 ? values[1].trim() : "";
-                                        double humedad = values.length > 2 && !values[2].isEmpty() ? Double.parseDouble(values[2].trim()) : 0.0;
-                                        double temperatura = values.length > 3 && !values[3].isEmpty() ? Double.parseDouble(values[3].trim()) : 0.0;
-                                        MongoManager.insertLectura(idSensor, fecha, humedad, temperatura);
-                                    } catch (Exception e) {
-                                        logger.debug("No se insertó en MongoDB (posible configuración ausente): {}", e.getMessage());
-                                    }
-
-                                    for (int j = 0; j < headers.length; j++) {
-                                        String value = j < values.length ? values[j].trim() : "";
-                                        obj.put(headers[j], value);
-                                    }
-                                    jsonArray.put(obj);
-                                }
-
-                                String jsonOutput = jsonArray.toString(4);
-                                exchange.getMessage().setBody(jsonOutput);
-                                exchange.getMessage().setHeader("CamelFileName", "sensores.json");
-                                logger.info("CSV convertido exitosamente a JSON");
-                            } catch (Exception e) {
-                                logger.error("Error procesando CSV: " + e.getMessage(), e);
-                                throw e;
-                            }
-                        })
-                        .to("file:agroanalyzer")
-                        .log("Archivo JSON enviado a AgroAnalyzer.");
-                }
-            });
-
-            context.start();
-            logger.info("Ruta activa. Esperando archivos CSV...");
-            Thread.sleep(10000);
-        } catch (Exception e) {
-            logger.error("Error en la aplicación: " + e.getMessage(), e);
-            System.exit(1);
+        context.start();
+        ProducerTemplate template = context.createProducerTemplate();
+        
+        System.out.println("\n=== Simulación de Llamadas RPC ===");
+        System.out.println("Este programa simula llamadas RPC entre componentes usando Apache Camel");
+        System.out.println("------------------------------------------------------------");
+        
+        String[] sensores = {"S001", "S002", "S003", "S004"};
+        for (String sensorId : sensores) {
+            System.out.println("\n>> Iniciando nueva solicitud RPC <<");
+            String response = template.requestBody("direct:solicitarLectura", sensorId, String.class);
+            System.out.println("------------------------------------------------------------");
         }
         
-        logger.info("Aplicación finalizada.");
+        context.stop();
     }
 }
