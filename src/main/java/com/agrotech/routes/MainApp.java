@@ -1,0 +1,89 @@
+package com.agrotech.routes;
+
+import org.apache.camel.CamelContext;
+import org.apache.camel.Exchange;
+import org.apache.camel.builder.RouteBuilder;
+import org.apache.camel.impl.DefaultCamelContext;
+import org.json.JSONArray;
+import org.json.JSONObject;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+public class MainApp {
+    private static final Logger logger = LoggerFactory.getLogger(MainApp.class);
+
+    public static void main(String[] args) {
+        logger.info("Iniciando la ruta Camel...");
+
+        try (CamelContext context = new DefaultCamelContext()) {
+            context.addRoutes(new RouteBuilder() {
+                @Override
+                public void configure() {
+                    from("file:SensData?noop=true&include=sensores.csv")
+                        .log("Archivo detectado: ${header.CamelFileName}")
+                        .process(exchange -> {
+                            logger.debug("Procesando archivo CSV...");
+                            String csv = exchange.getIn().getBody(String.class);
+                            
+                            if (csv == null || csv.trim().isEmpty()) {
+                                logger.warn("CSV vacío o nulo - generando JSON vacío");
+                                exchange.getMessage().setBody("[]");
+                                exchange.getMessage().setHeader("CamelFileName", "sensores.json");
+                                return;
+                            }
+
+                            try {
+                                String[] lines = csv.split("\\r?\\n");
+                                if (lines.length == 0) {
+                                    logger.warn("CSV sin líneas - generando JSON vacío");
+                                    exchange.getMessage().setBody("[]");
+                                    exchange.getMessage().setHeader("CamelFileName", "sensores.json");
+                                    return;
+                                }
+
+                                JSONArray jsonArray = new JSONArray();
+                                String headerLine = lines[0].trim();
+                                headerLine = headerLine.replace("\uFEFF", ""); // Eliminar BOM si existe
+                                String[] headers = headerLine.split(",");
+
+                                for (int i = 1; i < lines.length; i++) {
+                                    String line = lines[i].trim();
+                                    if (line.isEmpty()) {
+                                        continue;
+                                    }
+
+                                    String[] values = line.split(",", -1);
+                                    JSONObject obj = new JSONObject();
+
+                                    for (int j = 0; j < headers.length; j++) {
+                                        String value = j < values.length ? values[j].trim() : "";
+                                        obj.put(headers[j], value);
+                                    }
+                                    jsonArray.put(obj);
+                                }
+
+                                String jsonOutput = jsonArray.toString(4);
+                                exchange.getMessage().setBody(jsonOutput);
+                                exchange.getMessage().setHeader("CamelFileName", "sensores.json");
+                                logger.info("CSV convertido exitosamente a JSON");
+                            } catch (Exception e) {
+                                logger.error("Error procesando CSV: " + e.getMessage(), e);
+                                throw e;
+                            }
+                        })
+                        .to("file:agroanalyzer")
+                        .log("Archivo JSON enviado a AgroAnalyzer.");
+                }
+            });
+
+            context.start();
+            logger.info("Ruta activa. Esperando archivos CSV...");
+            Thread.sleep(10000);
+        } catch (Exception e) {
+            logger.error("Error en la aplicación: " + e.getMessage(), e);
+            System.exit(1);
+        }
+        
+        logger.info("Aplicación finalizada.");
+    }
+}
