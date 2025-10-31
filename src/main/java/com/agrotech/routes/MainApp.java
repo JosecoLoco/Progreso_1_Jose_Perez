@@ -8,12 +8,20 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import com.agrotech.db.MongoManager;
 
 public class MainApp {
     private static final Logger logger = LoggerFactory.getLogger(MainApp.class);
 
     public static void main(String[] args) {
-        logger.info("Iniciando la ruta Camel...");
+    logger.info("Iniciando la ruta Camel...");
+
+        // Inicializar MongoDB (usa MONGO_URI env var o mongodb://localhost:27017)
+        try {
+            MongoManager.init();
+        } catch (Exception e) {
+            logger.warn("No se pudo inicializar MongoDB: {}. Continuando sin BD.", e.getMessage());
+        }
 
         try (CamelContext context = new DefaultCamelContext()) {
             context.addRoutes(new RouteBuilder() {
@@ -54,6 +62,17 @@ public class MainApp {
 
                                     String[] values = line.split(",", -1);
                                     JSONObject obj = new JSONObject();
+
+                                    // Intentar parsear e insertar en MongoDB (si está disponible)
+                                    try {
+                                        String idSensor = values.length > 0 ? values[0].trim() : "";
+                                        String fecha = values.length > 1 ? values[1].trim() : "";
+                                        double humedad = values.length > 2 && !values[2].isEmpty() ? Double.parseDouble(values[2].trim()) : 0.0;
+                                        double temperatura = values.length > 3 && !values[3].isEmpty() ? Double.parseDouble(values[3].trim()) : 0.0;
+                                        MongoManager.insertLectura(idSensor, fecha, humedad, temperatura);
+                                    } catch (Exception e) {
+                                        logger.debug("No se insertó en MongoDB (posible configuración ausente): {}", e.getMessage());
+                                    }
 
                                     for (int j = 0; j < headers.length; j++) {
                                         String value = j < values.length ? values[j].trim() : "";
